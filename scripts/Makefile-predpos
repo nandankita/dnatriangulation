@@ -1,0 +1,56 @@
+
+SHELL = zsh
+
+BINSIZE = 200000
+
+
+data:
+	zcat Data/test-200kb.matrix | \
+	awk '{if(NR>9){print $$0}}' | \
+	sed 1d | \
+	sed 's/|/\t/g' | \
+	cut -f 3- | \
+	sed 's/:/\t/' | \
+	sed 's/-/\t/' \
+	> Data/HiC_$(BINSIZE).tab
+
+	cat Data/HiC_$(BINSIZE).tab | \
+	cut -f 1 | \
+        sort | \
+	uniq -c | \
+	perl -lane 'print $$F[1],"\t",$$F[0]' \
+	> Data/Bincount_$(BINSIZE).tab
+
+
+large_scaffolds:
+	python pyval.py -d Data/Bincount_$(BINSIZE).tab Data/HiC_$(BINSIZE).tab -hc 1 3 -e 'x=dict(zip(hc[0],d[0].flatten()));v=np.array([x[i]>=1 for i in hc[1][0]]);nprint([np.array(hc[1])[:,v].T,d[1][v,:][:,v]])' \
+	> Data/HiC_$(BINSIZE)_large.tab
+
+
+karyotype:
+	mkdir -p Output/Karyotype
+
+	python karyotype.py -in Data/HiC_$(BINSIZE)_large.tab -out Output/Karyotype/Karyotype_$(BINSIZE)_large -ci -n 100 -f 0.9 -s 0 -p 10
+
+
+.PHONY: scaffold
+.NOTPARALLEL: scaffold
+
+scaffold: $(foreach c, init $(shell cat Output/Karyotype/Karyotype_$(BINSIZE)_large_clusters.tab | cut -f 4 | sort | uniq -c | sed 's/  */\t/g' | sort -k 2,2nr | cut -f 3), scaffold_$(c) )
+
+
+scaffold_init:
+
+
+scaffold_%: c=$*
+
+scaffold_%:
+	cat Output/Scaffold/Scaffold_VCs_$(BINSIZE)_$(c)_predpos.tab | \
+	sort -k 2,2g | \
+	sed -e 's/$$/\t$(c)/' \
+	>> Output/Scaffold/Scaffold_VCs_$(BINSIZE)_predpos.tab
+
+scaffold_wrap:
+	python pyval.py -d =(sed -e 's/\t/__/' -e 's/\t/__/' Data/HiC_$(BINSIZE)_large.tab) Output/Scaffold/Scaffold_VCs_$(BINSIZE)_predpos.tab  -hc 1 1 -m -e 'x=collections.OrderedDict();for i,j in zip(d[1][:,1],hc[1]):; if i not in x:;  x[i]=[]; x[i].append(j);x=collections.OrderedDict(sorted(x.items(),key=(lambda y: len(y[1])),reverse=True));t=list(it.chain(*x.values()));p=np.array([hc[0].index(i) for i in t]);nprint([t,d[0][:,p][p,:]])' \
+        > Data_rearranged_VCs_$(BINSIZE).tab
+
